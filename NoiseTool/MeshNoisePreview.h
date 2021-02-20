@@ -107,12 +107,14 @@ namespace Magnum
                 FastNoise::SmartNode<const FastNoise::Generator> generator;
                 Vector3i pos;
                 Color3 color;
-                float frequency, isoSurface;
+                float frequency, isoSurface, amplitude;
+                bool showHeightmap;
                 int32_t seed;
                 uint32_t genVersion;
             };
 
             static MeshData BuildMeshData( const BuildData& buildData );
+            static MeshData BuildMeshDataHeightmap( const BuildData& buildData );
 
             Chunk( MeshData& meshData );
 

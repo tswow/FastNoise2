@@ -17,6 +17,8 @@ using namespace Magnum;
 MeshNoisePreview::MeshNoisePreview()
 {
     mBuildData.frequency = 0.005f;
+    mBuildData.amplitude = 20;
+    mBuildData.showHeightmap = true;
     mBuildData.seed = 1338;
     mBuildData.isoSurface = 0.0f;
     mBuildData.color = Color3( 1.0f );
@@ -117,6 +119,8 @@ void MeshNoisePreview::Draw( const Matrix4& transformation, const Matrix4& proje
     if( ImGui::ColorEdit3( "Mesh Colour", mBuildData.color.data() ) |
         ImGui::DragInt( "Seed", &mBuildData.seed ) |
         ImGui::DragFloat( "Frequency", &mBuildData.frequency, 0.0005f, 0, 0, "%.4f" ) |
+        ImGui::DragFloat( "Amplitude", &mBuildData.amplitude, 0.05f, 0, 0, "%.4f" ) |
+        ImGui::Checkbox( "Show Heightmap" , &mBuildData.showHeightmap) | 
         ImGui::DragFloat( "Iso Surface", &mBuildData.isoSurface, 0.02f ) )
     {
         ReGenerate( mBuildData.generator );
@@ -272,14 +276,75 @@ void MeshNoisePreview::GenerateLoopThread( GenerateQueue<Chunk::BuildData>& gene
         {
             return;
         }
-
-        Chunk::MeshData meshData = Chunk::BuildMeshData( buildData );
+        
+        Chunk::MeshData meshData = buildData.showHeightmap ? 
+            Chunk::BuildMeshDataHeightmap( buildData ) : 
+            Chunk::BuildMeshData( buildData );
 
         if( !completeQueue.Push( meshData, buildData.genVersion ) )
         {
             meshData.Free();
         }
     }
+}
+
+MeshNoisePreview::Chunk::MeshData MeshNoisePreview::Chunk::BuildMeshDataHeightmap( const BuildData& buildData )
+{
+    thread_local static std::vector<float> densityValues( SIZE_GEN * SIZE_GEN * SIZE_GEN );
+    thread_local static std::vector<VertexData> vertexData;
+    thread_local static std::vector<uint32_t> indicies;
+
+    auto map2d = buildData.generator->GenUniformGrid2D( densityValues.data(), buildData.pos.x(), buildData.pos.z(), SIZE_GEN, SIZE_GEN, buildData.frequency, buildData.seed );
+
+    vertexData.clear();
+    indicies.clear();
+
+    constexpr int32_t STEP_X = 1;
+    constexpr int32_t STEP_Z = SIZE_GEN;
+
+    int32_t noiseIdx = STEP_X + STEP_Z;
+
+    for( uint32_t x = 0; x < SIZE; x++ )
+    {
+        for(uint32_t z = 0; z < SIZE; z++)
+        {
+            float xf = x + (float)buildData.pos.x();
+            float zf = z + (float)buildData.pos.z();
+
+            float v1 = densityValues[( x ) + ( (z)*SIZE_GEN )];
+            float v2 = densityValues[( x + 1 ) + ( (z)*SIZE_GEN )];
+            float v3 = densityValues[( x + 1 ) + ( ( z + 1 ) * SIZE_GEN )];
+            float v4 = densityValues[( x ) + ( ( z + 1 ) * SIZE_GEN )];
+
+            auto light = Magnum::Color3(( v1 / 2 ) + 0.5);
+
+            v1 *= buildData.amplitude;
+            v2 *= buildData.amplitude;
+            v3 *= buildData.amplitude;
+            v4 *= buildData.amplitude;
+
+            auto pos00 = Vector3( xf, v1, zf );
+            auto pos01 = Vector3( xf, v4, zf + 1 );
+            auto pos10 = Vector3( xf + 1, v3, zf + 1 );
+            auto pos11 = Vector3( xf + 1, v2, zf );
+
+            uint32_t vertIdx = (uint32_t)vertexData.size();
+            vertexData.emplace_back( pos00, light );
+            vertexData.emplace_back( pos01, light );
+            vertexData.emplace_back( pos11, light );
+            vertexData.emplace_back( pos10, light );
+
+            indicies.push_back( vertIdx );
+            indicies.push_back( vertIdx + 3 );
+            indicies.push_back( vertIdx + 2 );
+            indicies.push_back( vertIdx + 3 );
+            indicies.push_back( vertIdx + 0 );
+            indicies.push_back( vertIdx + 1 );
+        }
+    }
+
+    MeshData meshData( buildData.pos, map2d, vertexData, indicies );
+    return meshData;
 }
 
 
